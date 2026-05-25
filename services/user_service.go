@@ -35,7 +35,7 @@ func (s *userServiceImpl) RegisterUser(name, email, avatarURL string) (*models.U
 	if err := s.userRepo.Create(user); err != nil {
 		return nil, err
 	}
-	_ = s.redis.Del(context.Background(), "users_cache_*")
+	s.clearUserCache()
 	return user, nil
 }
 
@@ -60,19 +60,22 @@ func (s *userServiceImpl) UpdateUser(id uint, name, email, avatarURL string) (*m
 		return nil, err
 	}
 
-	_ = s.redis.Del(context.Background(), "users_cache_*")
+	s.clearUserCache()
 	return s.userRepo.GetByID(id)
 }
 
 func (s *userServiceImpl) SoftDeleteUser(id uint) error {
+	s.clearUserCache()
 	return s.userRepo.Delete(id)
 }
 
 func (s *userServiceImpl) HardDeleteUser(id uint) error {
+	s.clearUserCache()
 	return s.userRepo.HardDelete(id)
 }
 
 func (s *userServiceImpl) RestoreUser(id uint) error {
+	s.clearUserCache()
 	return s.userRepo.Restore(id)
 }
 
@@ -105,4 +108,15 @@ func (s *userServiceImpl) GetAllUsers(ctx context.Context, page, limit int) ([]m
 	}
 
 	return users, nil
+}
+
+func (s *userServiceImpl) clearUserCache() {
+	ctx := context.Background()
+	
+	keys, err := s.redis.Keys(ctx, "users_cache_*").Result()
+	if err != nil || len(keys) == 0 {
+		return
+	}
+
+	_ = s.redis.Del(ctx, keys...).Err()
 }

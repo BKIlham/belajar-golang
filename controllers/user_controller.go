@@ -157,7 +157,8 @@ func (c *UserController) GetAll(ctx *fiber.Ctx) error {
 	page, _ := strconv.Atoi(ctx.Query("page", "1"))
 	limit, _ := strconv.Atoi(ctx.Query("limit", "10"))
 
-	users, err := c.userService.GetAllUsers(page, limit)
+	// Teruskan ctx.Context() ke dalam service
+	users, err := c.userService.GetAllUsers(ctx.Context(), page, limit)
 	if err != nil {
 		return utils.SendError(ctx, fiber.StatusInternalServerError, "Gagal mengambil daftar user", err.Error())
 	}

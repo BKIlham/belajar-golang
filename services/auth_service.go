@@ -16,7 +16,7 @@ import (
 type AuthService interface {
 	Login(ctx context.Context, email, password string) (string, string, error)
 	Logout(ctx context.Context, userID uint) error
-	Refresh(ctx context.Context, refreshToken string) (string, error)
+	Refresh(ctx context.Context, refreshToken string) (string, string, error)
 }
 
 type authServiceImpl struct {
@@ -79,31 +79,34 @@ func (s *authServiceImpl) Logout(ctx context.Context, userID uint) error {
 	return s.redis.Del(ctx, redisKey).Err()
 }
 
-func (s *authServiceImpl) Refresh(ctx context.Context, refreshTokenStr string) (string, error) {
-	// 1. Parse dan validasi Refresh Token string
+func (s *authServiceImpl) Refresh(ctx context.Context, refreshTokenStr string) (string, string, error) {
+	// 1. Parse dan validasi Refresh Token string lama
 	token, err := jwt.Parse(refreshTokenStr, func(t *jwt.Token) (interface{}, error) {
 		return []byte(os.Getenv("JWT_REFRESH_SECRET")), nil
 	})
 
 	if err != nil || !token.Valid {
-		return "", errors.New("refresh token tidak valid atau kedaluwarsa")
+		return "", "", errors.New("refresh token tidak valid atau kedaluwarsa")
 	}
 
 	claims, ok := token.Claims.(jwt.MapClaims)
 	if !ok {
-		return "", errors.New("gagal membaca data token")
+		return "", "", errors.New("gagal membaca data token")
 	}
 
 	userID := uint(claims["user_id"].(float64))
 
-	// 2. Validasi apakah Refresh Token tersebut masih terdaftar di Redis
+	// 2. Validasi Whitelist di Redis: Apakah token lama ini masih terdaftar?
 	redisKey := fmt.Sprintf("refresh_token:%d", userID)
 	savedToken, err := s.redis.Get(ctx, redisKey).Result()
 	if err != nil || savedToken != refreshTokenStr {
-		return "", errors.New("sesi login telah berakhir, silakan login ulang")
+		// SEKURITI KRUSIAL: Jika token lama tidak cocok tapi valid, ada kemungkinan token telah dicuri!
+		// Paksa hapus sesi di Redis demi keamanan.
+		_ = s.redis.Del(ctx, redisKey)
+		return "", "", errors.New("sesi mencurigakan, silakan login ulang")
 	}
 
-	// 3. Jika valid, buatkan ACCESS TOKEN baru yang segar
+	// 3. GENERATE ACCESS TOKEN BARU (15 Menit)
 	newAccessClaims := jwt.MapClaims{
 		"user_id": userID,
 		"exp":     time.Now().Add(15 * time.Minute).Unix(),
@@ -111,8 +114,26 @@ func (s *authServiceImpl) Refresh(ctx context.Context, refreshTokenStr string) (
 	newAccessTokenObj := jwt.NewWithClaims(jwt.SigningMethodHS256, newAccessClaims)
 	newAccessToken, err := newAccessTokenObj.SignedString([]byte(os.Getenv("JWT_ACCESS_SECRET")))
 	if err != nil {
-		return "", nil
+		return "", "", err
 	}
 
-	return newAccessToken, nil
+	// 4. ROTASI REFRESH TOKEN: Buat Refresh Token BARU lagi (7 Hari)
+	newRefreshClaims := jwt.MapClaims{
+		"user_id": userID,
+		"exp":     time.Now().Add(7 * 24 * time.Hour).Unix(),
+	}
+	newRefreshTokenObj := jwt.NewWithClaims(jwt.SigningMethodHS256, newRefreshClaims)
+	newRefreshToken, err := newRefreshTokenObj.SignedString([]byte(os.Getenv("JWT_REFRESH_SECRET")))
+	if err != nil {
+		return "", "", err
+	}
+
+	// 5. Timpa Refresh Token lama di Redis dengan yang baru
+	err = s.redis.Set(ctx, redisKey, newRefreshToken, 7*24*time.Hour).Err()
+	if err != nil {
+		return "", "", errors.New("gagal memperbarui sesi di server")
+	}
+
+	// Kembalikan kedua token baru (Access & New Refresh)
+	return newAccessToken, newRefreshToken, nil
 }

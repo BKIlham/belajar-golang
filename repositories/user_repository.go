@@ -15,6 +15,7 @@ type UserRepository interface {
 	HardDelete(id uint) error
 	Restore(id uint) error
 	FindAll(page, limit int) ([]models.User, error)
+	GetByEmail(email string) (*models.User, error)
 }
 
 type userRepositoryImpl struct {
@@ -74,4 +75,15 @@ func (r *userRepositoryImpl) FindAll(page, limit int) ([]models.User, error) {
 	}
 
 	return users, nil
+}
+
+func (r *userRepositoryImpl) GetByEmail(email string) (*models.User, error) {
+	var user models.User
+	if err := r.db.Where("email = ?", email).First(&user).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, errors.New("email atau password salah")
+		}
+		return nil, err
+	}
+	return &user, nil
 }

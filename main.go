@@ -29,11 +29,14 @@ func main() {
 	storageService := services.NewStorageService(minioClient)
 	userService := services.NewUserService(userRepo, redisClient)
 	userController := controllers.NewUserController(userService, storageService)
-
+	
+	authService := services.NewAuthService(userRepo, redisClient)
+	authController := controllers.NewAuthController(authService)
+	
 	app := fiber.New()
 
 	middlewares.SetupMiddlewares(app, redisClient)
-	routes.SetupRoutes(app, userController)
+	routes.SetupRoutes(app, userController, authController)
 
 	port := os.Getenv("APP_PORT")
 	if port == "" {

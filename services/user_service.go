@@ -9,10 +9,11 @@ import (
 	"time"
 
 	"github.com/redis/go-redis/v9"
+	"golang.org/x/crypto/bcrypt"
 )
 
 type UserService interface {
-	RegisterUser(name, email, avatarURL string) (*models.User, error)
+	RegisterUser(name, email, password, avatarURL string) (*models.User, error)
 	GetUserByID(id uint) (*models.User, error)
 	UpdateUser(id uint, name, email, avatarURL string) (*models.User, error)
 	SoftDeleteUser(id uint) error
@@ -30,11 +31,23 @@ func NewUserService(repo repositories.UserRepository, rdb *redis.Client) UserSer
 	return &userServiceImpl{userRepo: repo, redis: rdb}
 }
 
-func (s *userServiceImpl) RegisterUser(name, email, avatarURL string) (*models.User, error) {
-	user := &models.User{Name: name, Email: email, AvatarURL: avatarURL}
+func (s *userServiceImpl) RegisterUser(name, email, password, avatarURL string) (*models.User, error) {
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		return nil, err
+	}
+
+	user := &models.User{
+		Name:      name,
+		Email:     email,
+		Password:  string(hashedPassword),
+		AvatarURL: avatarURL,
+	}
+
 	if err := s.userRepo.Create(user); err != nil {
 		return nil, err
 	}
+
 	s.clearUserCache()
 	return user, nil
 }
@@ -112,7 +125,7 @@ func (s *userServiceImpl) GetAllUsers(ctx context.Context, page, limit int) ([]m
 
 func (s *userServiceImpl) clearUserCache() {
 	ctx := context.Background()
-	
+
 	keys, err := s.redis.Keys(ctx, "users_cache_*").Result()
 	if err != nil || len(keys) == 0 {
 		return

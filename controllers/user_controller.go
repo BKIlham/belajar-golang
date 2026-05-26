@@ -21,9 +21,10 @@ func NewUserController(us services.UserService, ss services.StorageService) *Use
 func (c *UserController) Register(ctx *fiber.Ctx) error {
 	name := ctx.FormValue("name")
 	email := ctx.FormValue("email")
+	password := ctx.FormValue("password")
 
-	if name == "" || email == "" {
-		return utils.SendError(ctx, fiber.StatusBadRequest, "Nama dan email wajib diisi", nil)
+	if name == "" || email == "" || password == "" {
+		return utils.SendError(ctx, fiber.StatusBadRequest, "Nama, email, password wajib diisi", nil)
 	}
 
 	fileHeader, err := ctx.FormFile("avatar")
@@ -41,7 +42,7 @@ func (c *UserController) Register(ctx *fiber.Ctx) error {
 		}
 	}
 
-	user, err := c.userService.RegisterUser(name, email, avatarURL)
+	user, err := c.userService.RegisterUser(name, email, password, avatarURL)
 	if err != nil {
 		return utils.SendError(ctx, fiber.StatusInternalServerError, "Gagal menyimpan user ke database", err.Error())
 	}
@@ -60,7 +61,7 @@ func (c *UserController) GetProfile(ctx *fiber.Ctx) error {
 	if err != nil {
 		return utils.SendError(ctx, fiber.StatusNotFound, "User tidak ditemukan", err.Error())
 	}
-	
+
 	if user.AvatarURL != "" {
 		secureURL, err := c.storageService.GetPresignedURL(ctx.Context(), user.AvatarURL)
 		if err == nil {
